@@ -231,14 +231,15 @@ export default function Home() {
         return;
       }
 
-      setResult(json.data);
+      const data = json.data;
+      setResult(data);
       setHistory((prev) => [
         {
           at: new Date().toISOString(),
           stage: currentStage,
           message,
           blocked: false,
-          result: json.data,
+          result: data,
           meta: json.meta,
         },
         ...prev,
