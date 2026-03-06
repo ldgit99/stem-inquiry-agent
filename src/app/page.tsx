@@ -60,31 +60,30 @@ const STAGES: Stage[] = [
 ];
 
 const STAGE_LABEL: Record<Stage, string> = {
-  QUESTION_DEFINITION: "질문정의",
-  HYPOTHESIS: "가설",
-  EXPERIMENT_DESIGN: "설계",
-  DATA_COLLECTION: "수집",
-  DATA_ANALYSIS: "분석",
-  CONCLUSION: "결론",
-  REFLECTION: "성찰",
+  QUESTION_DEFINITION: "탐구 문제 정교화",
+  HYPOTHESIS: "가설 설정",
+  EXPERIMENT_DESIGN: "실험 설계",
+  DATA_COLLECTION: "데이터 수집",
+  DATA_ANALYSIS: "자료 해석",
+  CONCLUSION: "결론 도출",
+  REFLECTION: "성찰 및 개선",
 };
 
-const STORAGE_KEY = "stem-coach-dashboard-v3";
+const STORAGE_KEY = "stem-coach-dashboard-v4";
 
 const GUARDRAIL_PROMPTS = [
-  "정답 말고 힌트 2개만 주세요.",
-  "현재 단계에서 근거 중심 질문을 해주세요.",
-  "오차 원인 1개와 통제 변수 개선점을 알려주세요.",
+  "정답 대신 지금 단계에 맞는 힌트 2개를 주세요.",
+  "근거를 더 강하게 만들 수 있는 질문을 해주세요.",
+  "오차 원인과 통제 변수 보완점을 짚어주세요.",
 ];
 
 export default function Home() {
   const defaultSessionId = useMemo(() => `session-${Date.now()}`, []);
 
   const [activeTab, setActiveTab] = useState<"coach" | "output" | "chat">("coach");
-
   const [sessionId, setSessionId] = useState(defaultSessionId);
   const [currentStage, setCurrentStage] = useState<Stage>("HYPOTHESIS");
-  const [message, setMessage] = useState("가설을 더 정교하게 만들 수 있도록 근거 중심 질문을 해줘.");
+  const [message, setMessage] = useState("가설을 더 타당하게 만들 수 있도록 근거 중심 질문을 해줘.");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -101,19 +100,17 @@ export default function Home() {
     {
       role: "assistant",
       content:
-        "탐구활동 보고서 작성을 도와드릴게요. 현재 초안을 바탕으로 문단 구조, 근거 연결, 한계/후속실험 문장을 함께 정리해봅시다.",
+        "탐구활동 보고서 작성 코치입니다. 초안을 붙여주면 문단 구조, 근거 연결, 한계/후속실험 문장을 함께 다듬어드릴게요.",
     },
   ]);
-  const [chatInput, setChatInput] = useState("현재 초안을 바탕으로 결과 해석 문단을 작성해줘.");
+  const [chatInput, setChatInput] = useState("현재 초안을 바탕으로 결과 해석 문단을 써줘.");
   const [chatLoading, setChatLoading] = useState(false);
   const [chatMeta, setChatMeta] = useState<ApiMeta | null>(null);
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) {
-        return;
-      }
+      if (!raw) return;
 
       const saved = JSON.parse(raw) as {
         sessionId?: string;
@@ -257,9 +254,7 @@ export default function Home() {
   }
 
   async function sendReportChat() {
-    if (!chatInput.trim() || chatLoading) {
-      return;
-    }
+    if (!chatInput.trim() || chatLoading) return;
 
     const userMessage = chatInput.trim();
     setChatInput("");
@@ -315,7 +310,7 @@ export default function Home() {
 
   function appendNextActionToDraft() {
     if (!result?.nextAction) return;
-    const block = `- ${new Date().toISOString()} [${currentStage}] ${result.nextAction}`;
+    const block = `- ${new Date().toISOString()} [${STAGE_LABEL[currentStage]}] ${result.nextAction}`;
     setReportDraft((prev) => (prev ? `${prev}\n${block}` : block));
   }
 
@@ -343,7 +338,7 @@ export default function Home() {
 
           <div className="mt-5">
             <div className="mb-2 flex items-center justify-between text-xs font-semibold text-slate-600">
-              <span>단계 진행률</span>
+              <span>탐구 단계 진행률</span>
               <span>{progressPercent}%</span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-slate-200">
@@ -371,8 +366,8 @@ export default function Home() {
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard title="질문형 코칭률" value={`${kpi.questioningRate}%`} note="사고 촉진 질문 포함 비율" />
           <KpiCard title="근거 점검률" value={`${kpi.evidenceCoverage}%`} note="근거 체크리스트 포함 비율" />
-          <KpiCard title="가드레일 차단률" value={`${kpi.blockedRate}%`} note="안전/정답요청 차단 비율" />
-          <KpiCard title="단계 완주" value={kpi.completion} note="성찰 단계 도달 여부" />
+          <KpiCard title="가드레일 차단률" value={`${kpi.blockedRate}%`} note="위험/정답요청 차단 비율" />
+          <KpiCard title="단계 완주" value={kpi.completion} note="성찰 및 개선 단계 도달 여부" />
         </section>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm xl:hidden">
@@ -386,7 +381,7 @@ export default function Home() {
         <div className="grid gap-6 xl:grid-cols-[1fr_1fr_0.9fr]">
           <section className={`${activeTab !== "coach" ? "hidden xl:block" : "block"} rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl`}>
             <h2 className="text-xl font-extrabold">코치 입력</h2>
-            <p className="mt-1 text-sm text-slate-600">세션 데이터는 브라우저에 자동 저장됩니다.</p>
+            <p className="mt-1 text-sm text-slate-600">탐구 대화와 초안 데이터는 브라우저에 자동 저장됩니다.</p>
 
             <div className="mt-5 grid gap-4">
               <label className="grid gap-2 text-sm font-semibold" htmlFor="session-id">세션 ID
@@ -399,7 +394,7 @@ export default function Home() {
                 </select>
               </label>
 
-              <label className="grid gap-2 text-sm font-semibold" htmlFor="student-message">학생 입력
+              <label className="grid gap-2 text-sm font-semibold" htmlFor="student-message">학생 질문/요청
                 <textarea id="student-message" rows={6} value={message} onChange={(e) => setMessage(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2" />
               </label>
 
@@ -446,11 +441,11 @@ export default function Home() {
                     <p><span className="font-semibold">오차:</span> {result.checklist.error.join(" | ")}</p>
                     <p><span className="font-semibold">대안:</span> {result.checklist.alternatives.join(" | ")}</p>
                   </Card>
-                  <Card title="전이 질문" badge="권장">{result.transferQuestion}</Card>
+                  <Card title="다른 맥락 적용 질문" badge="권장">{result.transferQuestion}</Card>
                 </div>
               ) : null}
 
-              {!result && !error && !blocked ? <p className="text-slate-500">코칭을 실행하면 구조화된 출력이 표시됩니다.</p> : null}
+              {!result && !error && !blocked ? <p className="text-slate-500">코칭을 실행하면 구조화된 결과가 표시됩니다.</p> : null}
 
               <Card title="운영 메타" badge="디버그">
                 <p><span className="font-semibold">모델:</span> {meta?.model ?? "-"}</p>
@@ -459,8 +454,8 @@ export default function Home() {
                 <p><span className="font-semibold">토큰:</span> {meta?.tokenUsage ? `${meta.tokenUsage.input} 입력 / ${meta.tokenUsage.output} 출력 / ${meta.tokenUsage.total} 합계` : "-"}</p>
               </Card>
 
-              <Card title="빠른 노트" badge={`${notes.length}개`}>
-                {notes.length === 0 ? <p className="text-slate-500">아직 노트가 없습니다.</p> : null}
+              <Card title="탐구 노트" badge={`${notes.length}개`}>
+                {notes.length === 0 ? <p className="text-slate-500">아직 저장된 노트가 없습니다.</p> : null}
                 <ul className="space-y-1">{notes.map((note, idx) => (<li key={`${note}-${idx}`} className="rounded-lg bg-slate-50 px-2 py-1">{note}</li>))}</ul>
               </Card>
 
@@ -474,7 +469,7 @@ export default function Home() {
             <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-3">
               <div>
                 <h2 className="text-lg font-extrabold">보고서 작성 챗봇</h2>
-                <p className="text-xs text-slate-600">OpenAI 기반 한국어 보고서 작성 보조</p>
+                <p className="text-xs text-slate-600">보고서 문장 구성, 근거 연결, 표현 다듬기를 지원합니다.</p>
               </div>
               <button type="button" onClick={appendLastAssistantToDraft} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-100">마지막 답변 초안 반영</button>
             </div>
@@ -493,7 +488,7 @@ export default function Home() {
                 value={chatInput}
                 onChange={(e) => setChatInput(e.target.value)}
                 rows={4}
-                placeholder="예: 결과 해석 문단을 주장-근거-추론 구조로 다시 써줘"
+                placeholder="예: 결론 문단을 근거-주장 연결 중심으로 다시 써줘"
                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2"
               />
               <div className="flex items-center justify-between gap-2">
