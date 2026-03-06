@@ -352,22 +352,21 @@ async function runAgentWithTools(body: {
 
 function fallbackCoachingResponse(currentStage: InquiryStage) {
   return {
-    stageSummary: `${currentStage} 단계에서 핵심 근거를 정리하는 중입니다.`,
+    stageSummary: `${currentStage} stage: organizing key evidence before moving forward.`,
     thinkingQuestions: [
-      "이 주장을 직접 지지하는 관찰/데이터는 무엇인가요?",
-      "통제하지 못한 변수가 결과에 어떤 영향을 줄 수 있나요?",
+      "What direct observation or data supports your claim?",
+      "Which uncontrolled variable could have changed the outcome?",
     ],
-    nextAction: "가장 중요한 근거 1개와 부족한 근거 1개를 구분해 적어보세요.",
+    nextAction: "Write one strong piece of evidence and one missing piece of evidence.",
     checklist: {
-      evidence: ["주장마다 근거 출처를 1개 이상 연결했는가"],
-      variables: ["독립/종속/통제 변수를 구분했는가"],
-      error: ["오차 원인 1개 이상을 명시했는가"],
-      alternatives: ["대안 해석 또는 반례 가능성을 점검했는가"],
+      evidence: ["Each claim references at least one data point or source."],
+      variables: ["Independent, dependent, and control variables are clearly separated."],
+      error: ["At least one likely error source is explicitly stated."],
+      alternatives: ["At least one alternative interpretation or counter-example is considered."],
     },
-    transferQuestion: "이 탐구 원리를 다른 과목 주제에 적용하면 어떤 질문이 가능할까요?",
+    transferQuestion: "How would this inquiry principle apply to a different subject area?",
   };
 }
-
 export async function POST(request: Request) {
   let json: RequestBody;
   try {
