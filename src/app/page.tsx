@@ -44,6 +44,11 @@ type HistoryItem = {
   meta?: ApiMeta;
 };
 
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 const STAGES: Stage[] = [
   "QUESTION_DEFINITION",
   "HYPOTHESIS",
@@ -64,7 +69,7 @@ const STAGE_LABEL: Record<Stage, string> = {
   REFLECTION: "Reflect",
 };
 
-const STORAGE_KEY = "stem-coach-dashboard-v1";
+const STORAGE_KEY = "stem-coach-dashboard-v2";
 
 const GUARDRAIL_PROMPTS = [
   "Give me two hints, not the final answer.",
@@ -75,7 +80,8 @@ const GUARDRAIL_PROMPTS = [
 export default function Home() {
   const defaultSessionId = useMemo(() => `session-${Date.now()}`, []);
 
-  const [activeTab, setActiveTab] = useState<"coach" | "output">("coach");
+  const [activeTab, setActiveTab] = useState<"coach" | "output" | "chat">("coach");
+
   const [sessionId, setSessionId] = useState(defaultSessionId);
   const [currentStage, setCurrentStage] = useState<Stage>("HYPOTHESIS");
   const [message, setMessage] = useState("Help me improve my hypothesis with evidence-focused questions.");
@@ -91,12 +97,23 @@ export default function Home() {
   const [notes, setNotes] = useState<string[]>([]);
   const [reportDraft, setReportDraft] = useState("");
 
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      content: "I can help you draft your inquiry report section-by-section. Ask for structure, wording, or evidence checks.",
+    },
+  ]);
+  const [chatInput, setChatInput] = useState("Help me draft the Discussion section from my current notes.");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatMeta, setChatMeta] = useState<ApiMeta | null>(null);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
         return;
       }
+
       const saved = JSON.parse(raw) as {
         sessionId?: string;
         currentStage?: Stage;
@@ -104,6 +121,7 @@ export default function Home() {
         history?: HistoryItem[];
         notes?: string[];
         reportDraft?: string;
+        chatMessages?: ChatMessage[];
       };
 
       if (saved.sessionId) {
@@ -116,16 +134,19 @@ export default function Home() {
         setMessage(saved.message);
       }
       if (saved.history) {
-        setHistory(saved.history.slice(0, 20));
+        setHistory(saved.history.slice(0, 30));
       }
       if (saved.notes) {
-        setNotes(saved.notes.slice(0, 20));
+        setNotes(saved.notes.slice(0, 30));
       }
       if (saved.reportDraft) {
         setReportDraft(saved.reportDraft);
       }
+      if (saved.chatMessages && saved.chatMessages.length > 0) {
+        setChatMessages(saved.chatMessages.slice(-24));
+      }
     } catch {
-      // Ignore malformed local storage.
+      // Ignore malformed storage.
     }
   }, []);
 
@@ -139,9 +160,10 @@ export default function Home() {
         history,
         notes,
         reportDraft,
+        chatMessages,
       }),
     );
-  }, [sessionId, currentStage, message, history, notes, reportDraft]);
+  }, [sessionId, currentStage, message, history, notes, reportDraft, chatMessages]);
 
   const stageIndex = STAGES.indexOf(currentStage);
   const progressPercent = Math.round(((stageIndex + 1) / STAGES.length) * 100);
@@ -149,27 +171,18 @@ export default function Home() {
   const kpi = useMemo(() => {
     const total = history.length;
     const blockedCount = history.filter((h) => h.blocked).length;
-    const questioningRate =
-      total === 0
-        ? 0
-        : Math.round(
-            (history.filter((h) => (h.result?.thinkingQuestions.length ?? 0) > 0).length / total) * 100,
-          );
-
-    const evidenceCoverage =
-      history.length === 0
-        ? 0
-        : Math.round(
-            (history.filter((h) => (h.result?.checklist.evidence.length ?? 0) > 0).length / total) * 100,
-          );
-
-    const completedReflection = history.some((h) => h.stage === "REFLECTION");
 
     return {
-      questioningRate,
-      evidenceCoverage,
+      questioningRate:
+        total === 0
+          ? 0
+          : Math.round((history.filter((h) => (h.result?.thinkingQuestions.length ?? 0) > 0).length / total) * 100),
+      evidenceCoverage:
+        total === 0
+          ? 0
+          : Math.round((history.filter((h) => (h.result?.checklist.evidence.length ?? 0) > 0).length / total) * 100),
       blockedRate: total === 0 ? 0 : Math.round((blockedCount / total) * 100),
-      completion: completedReflection ? "Complete" : "In Progress",
+      completion: history.some((h) => h.stage === "REFLECTION") ? "Complete" : "In Progress",
     };
   }, [history]);
 
@@ -179,7 +192,7 @@ export default function Home() {
     setBlocked(null);
     setStatusLine(retry ? "Retrying request..." : "Request in progress...");
 
-    const requestStarted = Date.now();
+    const started = Date.now();
 
     try {
       const response = await fetch("/api/agent", {
@@ -218,8 +231,8 @@ export default function Home() {
             meta: json.meta,
           },
           ...prev,
-        ].slice(0, 20));
-        setStatusLine(`Blocked by guardrail in ${Date.now() - requestStarted}ms`);
+        ].slice(0, 30));
+        setStatusLine(`Blocked by guardrail in ${Date.now() - started}ms`);
         setActiveTab("output");
         return;
       }
@@ -243,9 +256,9 @@ export default function Home() {
           meta: json.meta,
         },
         ...prev,
-      ].slice(0, 20));
+      ].slice(0, 30));
 
-      setStatusLine(`Completed in ${(json.meta?.requestMs ?? Date.now() - requestStarted)}ms`);
+      setStatusLine(`Completed in ${(json.meta?.requestMs ?? Date.now() - started)}ms`);
       setActiveTab("output");
     } catch {
       setError("Network error while calling /api/agent.");
@@ -256,11 +269,61 @@ export default function Home() {
     }
   }
 
+  async function sendReportChat() {
+    if (!chatInput.trim() || chatLoading) {
+      return;
+    }
+
+    const userMessage = chatInput.trim();
+    setChatInput("");
+    setChatLoading(true);
+
+    const nextMessages: ChatMessage[] = [...chatMessages, { role: "user", content: userMessage }];
+    setChatMessages(nextMessages);
+
+    try {
+      const response = await fetch("/api/report-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          stage: currentStage,
+          reportDraft,
+          userMessage,
+          history: nextMessages,
+        }),
+      });
+
+      if (!response.ok) {
+        const fallback = {
+          role: "assistant" as const,
+          content: `Report chat request failed with status ${response.status}.`,
+        };
+        setChatMessages((prev) => [...prev, fallback].slice(-24));
+        return;
+      }
+
+      const json = (await response.json()) as { reply?: string; meta?: ApiMeta };
+      const reply = json.reply ?? "I could not generate a reply. Please try again.";
+
+      setChatMeta(json.meta ?? null);
+      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }].slice(-24));
+      setActiveTab("chat");
+    } catch {
+      setChatMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Network error while calling report chat." },
+      ].slice(-24));
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   function appendNextActionToNotes() {
     if (!result?.nextAction) {
       return;
     }
-    setNotes((prev) => [result.nextAction, ...prev].slice(0, 20));
+    setNotes((prev) => [result.nextAction, ...prev].slice(0, 30));
   }
 
   function appendNextActionToDraft() {
@@ -271,6 +334,15 @@ export default function Home() {
     setReportDraft((prev) => (prev ? `${prev}\n${block}` : block));
   }
 
+  function appendLastAssistantToDraft() {
+    const last = [...chatMessages].reverse().find((m) => m.role === "assistant");
+    if (!last) {
+      return;
+    }
+    const block = `\n\n[Chat Draft Suggestion]\n${last.content}`;
+    setReportDraft((prev) => `${prev}${block}`.trim());
+  }
+
   function applyGuardrailPrompt(prompt: string) {
     setMessage(prompt);
     setActiveTab("coach");
@@ -278,11 +350,11 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[linear-gradient(120deg,#fff7ed_0%,#eef2ff_50%,#f0fdfa_100%)] px-4 py-6 text-slate-900 sm:px-8 sm:py-8">
-      <div className="mx-auto w-full max-w-7xl space-y-6">
+      <div className="mx-auto w-full max-w-[1700px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-lg backdrop-blur sm:p-6">
           <p className="text-xs font-bold tracking-[0.2em] text-cyan-700">STEM COACH DASHBOARD</p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-2xl font-black sm:text-3xl">Reasoning-first inquiry cockpit</h1>
+            <h1 className="text-2xl font-black sm:text-3xl">Three-panel inquiry workspace</h1>
             <p className="rounded-full bg-slate-900 px-3 py-1 text-xs font-bold text-white">{statusLine}</p>
           </div>
 
@@ -320,98 +392,50 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard title="Questioning Rate" value={`${kpi.questioningRate}%`} note="Prompt outputs with coaching questions" />
           <KpiCard title="Evidence Coverage" value={`${kpi.evidenceCoverage}%`} note="Responses with evidence checklist" />
           <KpiCard title="Blocked Rate" value={`${kpi.blockedRate}%`} note="Guardrail-triggered requests" />
           <KpiCard title="Stage Completion" value={kpi.completion} note="Reached reflection stage" />
         </section>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm lg:hidden">
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              className={`rounded-xl px-3 py-2 text-sm font-bold ${activeTab === "coach" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}
-              onClick={() => setActiveTab("coach")}
-              type="button"
-            >
-              Coach Input
-            </button>
-            <button
-              className={`rounded-xl px-3 py-2 text-sm font-bold ${activeTab === "output" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}
-              onClick={() => setActiveTab("output")}
-              type="button"
-            >
-              Output & Ops
-            </button>
+        <div className="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm xl:hidden">
+          <div className="grid grid-cols-3 gap-2">
+            <TabButton active={activeTab === "coach"} onClick={() => setActiveTab("coach")}>Coach</TabButton>
+            <TabButton active={activeTab === "output"} onClick={() => setActiveTab("output")}>Output</TabButton>
+            <TabButton active={activeTab === "chat"} onClick={() => setActiveTab("chat")}>Report Chat</TabButton>
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-          <section className={`${activeTab !== "coach" ? "hidden lg:block" : "block"} rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl`}>
+        <div className="grid gap-6 xl:grid-cols-[1fr_1fr_0.9fr]">
+          <section className={`${activeTab !== "coach" ? "hidden xl:block" : "block"} rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl`}>
             <h2 className="text-xl font-extrabold">Coach Input</h2>
             <p className="mt-1 text-sm text-slate-600">Session persists locally. Refresh-safe.</p>
 
             <div className="mt-5 grid gap-4">
-              <label className="grid gap-2 text-sm font-semibold" htmlFor="session-id">
-                Session ID
-                <input
-                  id="session-id"
-                  value={sessionId}
-                  onChange={(e) => setSessionId(e.target.value)}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none ring-cyan-200 focus:ring-2"
-                />
+              <label className="grid gap-2 text-sm font-semibold" htmlFor="session-id">Session ID
+                <input id="session-id" value={sessionId} onChange={(e) => setSessionId(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 font-mono text-sm outline-none ring-cyan-200 focus:ring-2" />
               </label>
 
-              <label className="grid gap-2 text-sm font-semibold" htmlFor="stage">
-                Inquiry Stage
-                <select
-                  id="stage"
-                  value={currentStage}
-                  onChange={(e) => setCurrentStage(e.target.value as Stage)}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2"
-                >
-                  {STAGES.map((stage) => (
-                    <option key={stage} value={stage}>
-                      {stage}
-                    </option>
-                  ))}
+              <label className="grid gap-2 text-sm font-semibold" htmlFor="stage">Inquiry Stage
+                <select id="stage" value={currentStage} onChange={(e) => setCurrentStage(e.target.value as Stage)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2">
+                  {STAGES.map((stage) => (<option key={stage} value={stage}>{stage}</option>))}
                 </select>
               </label>
 
-              <label className="grid gap-2 text-sm font-semibold" htmlFor="student-message">
-                Student Message
-                <textarea
-                  id="student-message"
-                  rows={6}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2"
-                />
+              <label className="grid gap-2 text-sm font-semibold" htmlFor="student-message">Student Message
+                <textarea id="student-message" rows={6} value={message} onChange={(e) => setMessage(e.target.value)} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2" />
               </label>
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => runCoaching(false)}
-                  disabled={loading || !sessionId || !message}
-                  className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                  type="button"
-                >
-                  {loading ? "Running..." : "Run Coaching"}
-                </button>
-                <button
-                  onClick={() => runCoaching(true)}
-                  disabled={loading || !sessionId || !message}
-                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-                  type="button"
-                >
-                  Retry
-                </button>
+                <button onClick={() => runCoaching(false)} disabled={loading || !sessionId || !message} type="button" className="inline-flex items-center justify-center rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400">{loading ? "Running..." : "Run Coaching"}</button>
+                <button onClick={() => runCoaching(true)} disabled={loading || !sessionId || !message} type="button" className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400">Retry</button>
               </div>
             </div>
           </section>
 
-          <section className={`${activeTab !== "output" ? "hidden lg:block" : "block"} rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl`}>
-            <h2 className="text-xl font-extrabold">Output & Operations</h2>
+          <section className={`${activeTab !== "output" ? "hidden xl:block" : "block"} rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl`}>
+            <h2 className="text-xl font-extrabold">Output & Ops</h2>
 
             <div aria-live="polite" className="mt-4 space-y-3 text-sm">
               {error ? <p className="rounded-lg bg-rose-50 p-3 text-rose-700">{error}</p> : null}
@@ -423,14 +447,7 @@ export default function Home() {
                   <p className="text-amber-800">{blocked.safeAlternative}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {GUARDRAIL_PROMPTS.map((prompt) => (
-                      <button
-                        key={prompt}
-                        type="button"
-                        onClick={() => applyGuardrailPrompt(prompt)}
-                        className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                      >
-                        Use: {prompt}
-                      </button>
+                      <button key={prompt} type="button" onClick={() => applyGuardrailPrompt(prompt)} className="rounded-full border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100">Use: {prompt}</button>
                     ))}
                   </div>
                 </div>
@@ -438,76 +455,78 @@ export default function Home() {
 
               {result ? (
                 <div className="space-y-3">
-                  <Card title="Stage Summary" badge="Required">
-                    {result.stageSummary}
-                  </Card>
-
-                  <Card title="Thinking Questions" badge="Required">
-                    <ul className="list-disc space-y-1 pl-5">
-                      {result.thinkingQuestions.map((q) => (
-                        <li key={q}>{q}</li>
-                      ))}
-                    </ul>
-                  </Card>
-
+                  <Card title="Stage Summary" badge="Required">{result.stageSummary}</Card>
+                  <Card title="Thinking Questions" badge="Required"><ul className="list-disc space-y-1 pl-5">{result.thinkingQuestions.map((q) => (<li key={q}>{q}</li>))}</ul></Card>
                   <Card title="Next Action" badge="Actionable">
                     <p>{result.nextAction}</p>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <button type="button" onClick={appendNextActionToNotes} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700">
-                        Add to Notes
-                      </button>
-                      <button type="button" onClick={appendNextActionToDraft} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100">
-                        Append to Report Draft
-                      </button>
+                      <button type="button" onClick={appendNextActionToNotes} className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-bold text-white hover:bg-slate-700">Add to Notes</button>
+                      <button type="button" onClick={appendNextActionToDraft} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-100">Append to Report Draft</button>
                     </div>
                   </Card>
-
                   <Card title="Checklist" badge="Quality Gate">
                     <p><span className="font-semibold">Evidence:</span> {result.checklist.evidence.join(" | ")}</p>
                     <p><span className="font-semibold">Variables:</span> {result.checklist.variables.join(" | ")}</p>
                     <p><span className="font-semibold">Error:</span> {result.checklist.error.join(" | ")}</p>
                     <p><span className="font-semibold">Alternatives:</span> {result.checklist.alternatives.join(" | ")}</p>
                   </Card>
-
-                  <Card title="Transfer Question" badge="Recommended">
-                    {result.transferQuestion}
-                  </Card>
+                  <Card title="Transfer Question" badge="Recommended">{result.transferQuestion}</Card>
                 </div>
               ) : null}
 
-              {!result && !error && !blocked ? (
-                <p className="text-slate-500">Run a request to see structured coaching output.</p>
-              ) : null}
+              {!result && !error && !blocked ? <p className="text-slate-500">Run a request to see structured coaching output.</p> : null}
 
               <Card title="Operations Meta" badge="Debug">
                 <p><span className="font-semibold">Model:</span> {meta?.model ?? "-"}</p>
                 <p><span className="font-semibold">Run ID:</span> {meta?.runId ?? "-"}</p>
                 <p><span className="font-semibold">Request Time:</span> {meta?.requestMs ?? 0}ms</p>
-                <p>
-                  <span className="font-semibold">Tokens:</span>{" "}
-                  {meta?.tokenUsage
-                    ? `${meta.tokenUsage.input} in / ${meta.tokenUsage.output} out / ${meta.tokenUsage.total} total`
-                    : "-"}
-                </p>
+                <p><span className="font-semibold">Tokens:</span> {meta?.tokenUsage ? `${meta.tokenUsage.input} in / ${meta.tokenUsage.output} out / ${meta.tokenUsage.total} total` : "-"}</p>
+              </Card>
+
+              <Card title="Quick Notes" badge={`${notes.length} items`}>
+                {notes.length === 0 ? <p className="text-slate-500">No notes yet.</p> : null}
+                <ul className="space-y-1">{notes.map((note, idx) => (<li key={`${note}-${idx}`} className="rounded-lg bg-slate-50 px-2 py-1">{note}</li>))}</ul>
+              </Card>
+
+              <Card title="Report Draft" badge={`${reportDraft.length} chars`}>
+                <textarea value={reportDraft} onChange={(e) => setReportDraft(e.target.value)} rows={8} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none ring-cyan-200 focus:ring-2" />
               </Card>
             </div>
           </section>
-        </div>
 
-        <section className="grid gap-6 lg:grid-cols-2">
-          <Card title="Quick Notes" badge={`${notes.length} items`}>
-            {notes.length === 0 ? <p className="text-slate-500">No notes yet.</p> : null}
-            <ul className="space-y-1 text-sm">
-              {notes.map((note, idx) => (
-                <li key={`${note}-${idx}`} className="rounded-lg bg-slate-50 px-2 py-1">{note}</li>
+          <section className={`${activeTab !== "chat" ? "hidden xl:flex" : "flex"} min-h-[720px] flex-col rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-xl`}>
+            <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-3">
+              <div>
+                <h2 className="text-lg font-extrabold">Report Writing Chatbot</h2>
+                <p className="text-xs text-slate-600">OpenAI-powered assistant for inquiry report drafting.</p>
+              </div>
+              <button type="button" onClick={appendLastAssistantToDraft} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold hover:bg-slate-100">Add Last Reply to Draft</button>
+            </div>
+
+            <div className="mt-3 flex-1 space-y-2 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-3" aria-live="polite">
+              {chatMessages.map((m, idx) => (
+                <div key={`${m.role}-${idx}`} className={`max-w-[95%] rounded-xl px-3 py-2 text-sm ${m.role === "user" ? "ml-auto bg-slate-900 text-white" : "bg-white text-slate-800 border border-slate-200"}`}>
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-wide opacity-70">{m.role}</p>
+                  <p className="whitespace-pre-wrap">{m.content}</p>
+                </div>
               ))}
-            </ul>
-          </Card>
+            </div>
 
-          <Card title="Report Draft" badge={`${reportDraft.length} chars`}>
-            {reportDraft ? <pre className="whitespace-pre-wrap text-sm">{reportDraft}</pre> : <p className="text-slate-500">Draft is empty.</p>}
-          </Card>
-        </section>
+            <div className="mt-3 grid gap-2">
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                rows={4}
+                placeholder="Ask for report structure, section rewrite, evidence linkage, or limitations paragraph."
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-slate-500">{chatMeta ? `${chatMeta.model} · ${chatMeta.requestMs}ms` : "No chat run yet"}</p>
+                <button type="button" onClick={sendReportChat} disabled={chatLoading || !chatInput.trim()} className="rounded-xl bg-cyan-700 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-cyan-300">{chatLoading ? "Thinking..." : "Send"}</button>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </main>
   );
@@ -532,5 +551,17 @@ function Card({ title, badge, children }: { title: string; badge: string; childr
       </div>
       <div className="space-y-1 text-sm text-slate-700">{children}</div>
     </div>
+  );
+}
+
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      className={`rounded-xl px-3 py-2 text-sm font-bold ${active ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"}`}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
   );
 }
