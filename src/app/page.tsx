@@ -307,13 +307,15 @@ export default function Home() {
       const reply = json.reply ?? "I could not generate a reply. Please try again.";
 
       setChatMeta(json.meta ?? null);
-      setChatMessages((prev) => [...prev, { role: "assistant", content: reply }].slice(-24));
+      const assistantMessage: ChatMessage = { role: "assistant", content: reply };
+      setChatMessages((prev) => [...prev, assistantMessage].slice(-24));
       setActiveTab("chat");
     } catch {
-      setChatMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: "Network error while calling report chat." },
-      ].slice(-24));
+      const assistantMessage: ChatMessage = {
+        role: "assistant",
+        content: "Network error while calling report chat.",
+      };
+      setChatMessages((prev) => [...prev, assistantMessage].slice(-24));
     } finally {
       setChatLoading(false);
     }
@@ -521,7 +523,7 @@ export default function Home() {
                 className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm outline-none ring-cyan-200 focus:ring-2"
               />
               <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-slate-500">{chatMeta ? `${chatMeta.model} · ${chatMeta.requestMs}ms` : "No chat run yet"}</p>
+                <p className="text-xs text-slate-500">{chatMeta ? `${chatMeta.model} 鸚?${chatMeta.requestMs}ms` : "No chat run yet"}</p>
                 <button type="button" onClick={sendReportChat} disabled={chatLoading || !chatInput.trim()} className="rounded-xl bg-cyan-700 px-4 py-2 text-xs font-bold text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:bg-cyan-300">{chatLoading ? "Thinking..." : "Send"}</button>
               </div>
             </div>
