@@ -12,3 +12,128 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum UserRole {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum MessageRole {
+  STUDENT
+  AGENT
+  TEACHER
+  SYSTEM
+}
+
+enum InquiryStage {
+  QUESTION_DEFINITION
+  HYPOTHESIS
+  EXPERIMENT_DESIGN
+  DATA_COLLECTION
+  DATA_ANALYSIS
+  CONCLUSION
+  REFLECTION
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+model User {
+  id                     String           @id @default(cuid())
+  email                  String           @unique
+  name                   String?
+  role                   UserRole         @default(STUDENT)
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+  studentInquirySessions InquirySession[] @relation("StudentInquirySessions")
+  teacherInquirySessions InquirySession[] @relation("TeacherInquirySessions")
+}
+
+model InquirySession {
+  id             String                @id @default(cuid())
+  title          String
+  topic          String
+  currentStage   InquiryStage          @default(QUESTION_DEFINITION)
+  studentId      String
+  teacherId      String?
+  startedAt      DateTime              @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  student        User                  @relation("StudentInquirySessions", fields: [studentId], references: [id], onDelete: Restrict)
+  teacher        User?                 @relation("TeacherInquirySessions", fields: [teacherId], references: [id], onDelete: SetNull)
+  messages       ConversationMessage[]
+  decisionEvents DecisionEvent[]
+  reportVersions ReportVersion[]
+  agentRuns      AgentRun[]
+
+  @@index([studentId, currentStage])
+  @@index([teacherId, currentStage])
+  @@index([createdAt])
+}
+
+model ConversationMessage {
+  id        String         @id @default(cuid())
+  sessionId String
+  role      MessageRole
+  content   String
+  metadata  Json?
+  createdAt DateTime       @default(now())
+  session   InquirySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model DecisionEvent {
+  id           String         @id @default(cuid())
+  sessionId    String
+  stage        InquiryStage
+  actorRole    MessageRole
+  decisionType String
+  summary      String
+  evidence     Json?
+  alternatives Json?
+  createdAt    DateTime       @default(now())
+  session      InquirySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, stage, createdAt])
+  @@index([decisionType, createdAt])
+}
+
+model ReportVersion {
+  id             String         @id @default(cuid())
+  sessionId      String
+  version        Int
+  draftMarkdown  String
+  structuredData Json?
+  createdBy      MessageRole    @default(AGENT)
+  createdAt      DateTime       @default(now())
+  session        InquirySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, version])
+  @@index([sessionId, createdAt])
+}
+
+model AgentRun {
+  id           String         @id @default(cuid())
+  sessionId    String
+  model        String
+  status       AgentRunStatus @default(QUEUED)
+  traceId      String?
+  inputTokens  Int?
+  outputTokens Int?
+  latencyMs    Int?
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  session      InquirySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@index([status, createdAt])
+}
