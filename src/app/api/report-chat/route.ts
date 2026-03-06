@@ -19,28 +19,29 @@ type ReportChatResponse = {
 
 function buildSystemPrompt(stage: string): string {
   return [
-    "You are a STEM inquiry report writing assistant.",
-    "Help the student write clear, evidence-based report sections.",
-    "Do not fabricate data. If data is missing, ask for it and provide placeholders.",
-    "Prioritize structure: claim, evidence, reasoning, limitations, and next experiment.",
-    "Keep replies concise and actionable.",
-    `Current inquiry stage: ${stage}.`,
+    "당신은 STEM 탐구활동 보고서 작성을 돕는 한국어 코치입니다.",
+    "학생이 명확하고 근거 중심으로 보고서를 작성하도록 도와주세요.",
+    "데이터를 지어내지 말고, 누락된 정보는 질문하거나 자리표시자로 안내하세요.",
+    "구조는 주장-근거-추론-한계-후속실험 순서를 우선합니다.",
+    "간결하고 실행 가능한 문장으로 답하세요.",
+    `현재 탐구 단계: ${stage}.`,
+    "모든 답변은 반드시 한국어로 작성하세요.",
   ].join(" ");
 }
 
 function fallbackReply(stage: string, reportDraft: string): string {
   const hasDraft = reportDraft.trim().length > 0;
   const opening = hasDraft
-    ? "I reviewed your draft."
-    : "Start with a short report skeleton before expanding paragraphs.";
+    ? "현재 초안을 검토했습니다."
+    : "먼저 짧은 보고서 뼈대를 만든 뒤 문단을 확장해 보세요.";
 
   return [
     opening,
-    `For ${stage}, write:`,
-    "1) One claim sentence",
-    "2) Two evidence bullets (with numbers or observations)",
-    "3) One reasoning sentence linking evidence to the claim",
-    "4) One limitation and one next-step experiment",
+    `${stage} 단계 보고서 작성 순서:`,
+    "1) 주장 1문장",
+    "2) 근거 2개(수치/관찰 포함)",
+    "3) 근거와 주장을 연결하는 추론 1문장",
+    "4) 한계 1개와 후속 실험 1개",
   ].join("\n");
 }
 
@@ -96,12 +97,12 @@ export async function POST(request: Request) {
   try {
     body = (await request.json()) as ReportChatRequest;
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "JSON 본문 형식이 올바르지 않습니다." }, { status: 400 });
   }
 
   if (!body?.sessionId || !body?.stage || !body?.userMessage) {
     return NextResponse.json(
-      { error: "sessionId, stage, and userMessage are required" },
+      { error: "sessionId, stage, userMessage는 필수입니다." },
       { status: 400 },
     );
   }
@@ -127,9 +128,9 @@ export async function POST(request: Request) {
       {
         role: "user",
         content: [
-          `Session ID: ${body.sessionId}`,
-          "Current report draft:",
-          body.reportDraft?.trim() ? body.reportDraft : "(empty draft)",
+          `세션 ID: ${body.sessionId}`,
+          "현재 보고서 초안:",
+          body.reportDraft?.trim() ? body.reportDraft : "(초안 비어 있음)",
         ].join("\n\n"),
       },
       ...history,
@@ -142,15 +143,12 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model,
-        input,
-      }),
+      body: JSON.stringify({ model, input }),
     });
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`Responses API failed (${response.status}): ${text}`);
+      throw new Error(`Responses API 요청 실패 (${response.status}): ${text}`);
     }
 
     const payload = (await response.json()) as { id?: string };
