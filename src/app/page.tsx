@@ -88,10 +88,10 @@ export default function Home() {
         <section className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl backdrop-blur sm:p-8">
           <p className="text-xs font-bold tracking-[0.2em] text-amber-700">STEM INQUIRY COACH</p>
           <h1 className="mt-3 text-3xl font-black leading-tight sm:text-4xl">
-            질문으로 사고를 깊게 만드는 탐구 코칭
+            Inquiry coaching focused on reasoning, not final answers
           </h1>
           <p className="mt-4 text-sm text-slate-600 sm:text-base">
-            정답 제공 대신, 근거 중심 질문과 단계별 점검으로 탐구 과정을 구조화합니다.
+            Use structured prompts to guide scientific thinking by stage, with evidence checks and transfer questions.
           </p>
 
           <div className="mt-7 grid gap-4">
