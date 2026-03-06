@@ -41,6 +41,17 @@ type SessionState = {
   reportDraft: string;
 };
 
+type ApiMeta = {
+  runId: string | null;
+  model: string;
+  requestMs: number;
+  tokenUsage?: {
+    input: number;
+    output: number;
+    total: number;
+  };
+};
+
 const MEMORY_STORE = new Map<string, SessionState>();
 
 function ensureSessionState(sessionId: string, currentStage: InquiryStage): SessionState {
@@ -139,6 +150,42 @@ function extractOutputText(response: unknown): string | null {
   }
 
   return null;
+}
+
+function extractApiMeta(response: unknown, requestMs: number): ApiMeta {
+  const fallbackModel = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+  if (!response || typeof response !== "object") {
+    return {
+      runId: null,
+      model: fallbackModel,
+      requestMs,
+    };
+  }
+
+  const typed = response as {
+    id?: string;
+    model?: string;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+      total_tokens?: number;
+    };
+  };
+
+  const input = typed.usage?.input_tokens ?? 0;
+  const output = typed.usage?.output_tokens ?? 0;
+  const total = typed.usage?.total_tokens ?? input + output;
+
+  return {
+    runId: typed.id ?? null,
+    model: typed.model ?? fallbackModel,
+    requestMs,
+    tokenUsage: {
+      input,
+      output,
+      total,
+    },
+  };
 }
 
 async function callResponsesApi(payload: Record<string, unknown>): Promise<unknown> {
@@ -367,7 +414,11 @@ function fallbackCoachingResponse(currentStage: InquiryStage) {
     transferQuestion: "How would this inquiry principle apply to a different subject area?",
   };
 }
+
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+
   let json: RequestBody;
   try {
     json = (await request.json()) as RequestBody;
@@ -398,6 +449,11 @@ export async function POST(request: Request) {
         blocked: true,
         reason: guardrail.reason,
         safeAlternative: guardrail.safeAlternative,
+        meta: {
+          runId: null,
+          model,
+          requestMs: Date.now() - startedAt,
+        },
       },
       { status: 200 },
     );
@@ -411,17 +467,35 @@ export async function POST(request: Request) {
     });
 
     const outputText = extractOutputText(response);
+    const meta = extractApiMeta(response, Date.now() - startedAt);
+
     if (!outputText) {
-      return NextResponse.json({ data: fallbackCoachingResponse(json.currentStage) }, { status: 200 });
+      return NextResponse.json(
+        { data: fallbackCoachingResponse(json.currentStage), meta },
+        { status: 200 },
+      );
     }
 
     const parsed = coachingResponseSchema.safeParse(safeJsonParse(outputText));
     if (!parsed.success) {
-      return NextResponse.json({ data: fallbackCoachingResponse(json.currentStage) }, { status: 200 });
+      return NextResponse.json(
+        { data: fallbackCoachingResponse(json.currentStage), meta },
+        { status: 200 },
+      );
     }
 
-    return NextResponse.json({ data: parsed.data }, { status: 200 });
+    return NextResponse.json({ data: parsed.data, meta }, { status: 200 });
   } catch {
-    return NextResponse.json({ data: fallbackCoachingResponse(json.currentStage) }, { status: 200 });
+    return NextResponse.json(
+      {
+        data: fallbackCoachingResponse(json.currentStage),
+        meta: {
+          runId: null,
+          model,
+          requestMs: Date.now() - startedAt,
+        },
+      },
+      { status: 200 },
+    );
   }
 }
