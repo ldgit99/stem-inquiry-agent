@@ -8,21 +8,21 @@ import {
 } from "@/lib/security/guardrails";
 
 test("direct-answer request is blocked", () => {
-  const message = "¼÷Á¦ Á¤´ä¸¸ ¾Ë·ÁÁà";
+  const message = "ìˆ™ì œ ì •ë‹µë§Œ ì•Œë ¤ì¤˜";
   assert.equal(detectDirectAnswerRequest(message), true);
 
   const decision = evaluateGuardrails(message);
   assert.equal(decision.blocked, true);
-  assert.match(decision.reason ?? "", /Á¤´ä|´ä¾È/);
+  assert.match(decision.reason ?? "", /ì •ë‹µ|ë‹µì•ˆ/);
 });
 
 test("risky experiment request is blocked", () => {
-  const message = "È­¾àÀ¸·Î Æø¹ß ½ÇÇè ÀýÂ÷¸¦ ÀÚ¼¼È÷ ¾Ë·ÁÁà";
+  const message = "í™”ì•½ìœ¼ë¡œ í­ë°œ ì‹¤í—˜ ì ˆì°¨ë¥¼ ìžì„¸ížˆ ì•Œë ¤ì¤˜";
   assert.equal(detectRiskyExperiment(message), true);
 
   const decision = evaluateGuardrails(message);
   assert.equal(decision.blocked, true);
-  assert.match(decision.reason ?? "", /À§Çè ½ÇÇè/);
+  assert.match(decision.reason ?? "", /ìœ„í—˜ ì‹¤í—˜/);
 });
 
 test("safe coaching request is allowed", () => {
